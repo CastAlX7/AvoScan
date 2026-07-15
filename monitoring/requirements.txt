@@ -1,0 +1,7 @@
+evidently==0.4.33
+pandas==2.2.2
+numpy==1.26.4
+tensorflow-cpu==2.16.1
+Pillow==10.4.0
+scikit-learn==1.5.1
+matplotlib==3.9.2

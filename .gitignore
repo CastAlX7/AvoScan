@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+.env.local
+
+# Model (too large for git - use Git LFS or download separately)
+backend/model/modelo_palta.keras
+
+# Monitoring reports
+monitoring/reports/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
