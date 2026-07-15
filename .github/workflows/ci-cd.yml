@@ -8,8 +8,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
-  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}/backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}/frontend
 
 jobs:
   # ─── Backend: lint + build + push ───
@@ -46,13 +46,11 @@ jobs:
 
       - name: Build and push backend image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          push: true
-          tags: |
-            ${{ env.BACKEND_IMAGE }}:latest
-            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+        run: |
+          IMAGE_NAME=$(echo "${{ env.BACKEND_IMAGE }}" | tr '[:upper:]' '[:lower:]')
+          docker build -t $IMAGE_NAME:latest -t $IMAGE_NAME:${{ github.sha }} ./backend
+          docker push $IMAGE_NAME:latest
+          docker push $IMAGE_NAME:${{ github.sha }}
 
   # ─── Frontend: lint + build + push ───
   frontend:
@@ -68,7 +66,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Install dependencies
         working-directory: ./frontend
@@ -94,15 +92,11 @@ jobs:
 
       - name: Build and push frontend image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          push: true
-          build-args: |
-            NEXT_PUBLIC_API_URL=${{ vars.API_URL || 'http://localhost:8000' }}
-          tags: |
-            ${{ env.FRONTEND_IMAGE }}:latest
-            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+        run: |
+          IMAGE_NAME=$(echo "${{ env.FRONTEND_IMAGE }}" | tr '[:upper:]' '[:lower:]')
+          docker build --build-arg NEXT_PUBLIC_API_URL=${{ vars.API_URL || 'http://localhost:8000' }} -t $IMAGE_NAME:latest -t $IMAGE_NAME:${{ github.sha }} ./frontend
+          docker push $IMAGE_NAME:latest
+          docker push $IMAGE_NAME:${{ github.sha }}
 
   # ─── Monitoring: generar reportes con Evidently AI ───
   monitoring:
@@ -131,7 +125,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add monitoring/reports/
+          git add -f monitoring/reports/
           git diff --staged --quiet || git commit -m "chore: actualizar reportes de monitoreo [skip ci]"
           git push
 
