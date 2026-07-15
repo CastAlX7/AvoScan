@@ -12,7 +12,7 @@ from PIL import Image
 IMG_SIZE = (224, 224)
 MODEL_PATH = "model/modelo_palta.keras"
 LABELS_PATH = "model/labels.json"
-REPORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "monitoring", "reports")
+REPORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reports")
 
 model = None
 class_names = None

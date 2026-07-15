@@ -118,14 +118,14 @@ jobs:
 
       - name: Generate Evidently reports
         working-directory: ./monitoring
-        run: python generate_reports.py --ref-csv ./data/reference.csv --output ./reports
+        run: python generate_reports.py --ref-csv ./data/reference.csv --output ../backend/reports
 
       - name: Commit and push reports
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f monitoring/reports/
+          git add -f backend/reports/
           git diff --staged --quiet || git commit -m "chore: actualizar reportes de monitoreo [skip ci]"
           git push
 
