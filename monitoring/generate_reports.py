@@ -9,19 +9,19 @@ contra datos de producción (nuevas imágenes procesadas por el modelo):
   4. Classification     — métricas de clasificación
   5. Data Integrity     — resumen completo de integridad
 
-Uso:
+Uso completo (con modelo y dataset):
     python generate_reports.py --model ../backend/model/modelo_palta.keras \
                                --dataset ../../Dataset_Palta_Maestro \
                                --output ./reports
+
+Uso ligero (con CSV pre-calculado, sin TensorFlow):
+    python generate_reports.py --ref-csv ./data/reference.csv --output ./reports
 """
 
 import argparse
 import os
-import json
 import numpy as np
 import pandas as pd
-from PIL import Image
-import tensorflow as tf
 from evidently.report import Report
 from evidently.metric_preset import (
     DataDriftPreset,
@@ -43,6 +43,7 @@ IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
 def extract_features(img_path: str) -> dict:
+    from PIL import Image
     img = np.array(Image.open(img_path).convert("RGB"), dtype=np.float32)
     h, w = img.shape[:2]
     gray = np.mean(img, axis=2)
@@ -60,6 +61,7 @@ def extract_features(img_path: str) -> dict:
 
 
 def predict_image(model, img_path: str, class_names: list) -> tuple:
+    from PIL import Image
     img = Image.open(img_path).convert("RGB").resize(IMG_SIZE)
     img_array = np.array(img, dtype=np.float32) / 255.0
     pred = model.predict(np.expand_dims(img_array, 0), verbose=0)
@@ -109,30 +111,138 @@ def simulate_drift(df_ref: pd.DataFrame) -> pd.DataFrame:
     return df_prod
 
 
+def generate_reports(df_ref: pd.DataFrame, df_prod: pd.DataFrame, output_dir: str):
+    os.makedirs(output_dir, exist_ok=True)
+
+    cols_features = [
+        "brillo", "contraste", "canal_R", "canal_G", "canal_B",
+        "saturacion", "nitidez", "confianza", "margen", "entropia",
+    ]
+
+    print("\n[1/5] Generando reporte de Data Drift...")
+    data_drift_report = Report(metrics=[
+        DataDriftPreset(),
+        DatasetDriftMetric(),
+    ])
+    data_drift_report.run(
+        reference_data=df_ref[cols_features],
+        current_data=df_prod[cols_features],
+    )
+    path = os.path.join(output_dir, "01_data_drift.html")
+    data_drift_report.save_html(path)
+    print(f"  Guardado: {path}")
+
+    print("[2/5] Generando reporte de Target Drift...")
+    df_ref_target = df_ref[["prediccion"]].rename(columns={"prediccion": "target"})
+    df_prod_target = df_prod[["prediccion"]].rename(columns={"prediccion": "target"})
+    target_drift_report = Report(metrics=[TargetDriftPreset()])
+    target_drift_report.run(
+        reference_data=df_ref_target,
+        current_data=df_prod_target,
+    )
+    path = os.path.join(output_dir, "02_target_drift.html")
+    target_drift_report.save_html(path)
+    print(f"  Guardado: {path}")
+
+    print("[3/5] Generando reporte de Data Quality...")
+    data_quality_report = Report(metrics=[
+        DataQualityPreset(),
+        DatasetMissingValuesMetric(),
+        DatasetCorrelationsMetric(),
+    ])
+    data_quality_report.run(
+        reference_data=df_ref[cols_features],
+        current_data=df_prod[cols_features],
+    )
+    path = os.path.join(output_dir, "03_data_quality.html")
+    data_quality_report.save_html(path)
+    print(f"  Guardado: {path}")
+
+    print("[4/5] Generando reporte de Clasificación...")
+    df_ref_cls = df_ref.rename(columns={"prediccion": "prediction"})
+    df_prod_cls = df_prod.rename(columns={"prediccion": "prediction"})
+    df_ref_cls["target"] = df_ref_cls["prediction"]
+    df_prod_cls["target"] = df_prod_cls["prediction"]
+    cls_report = Report(metrics=[ClassificationPreset()])
+    cls_report.run(
+        reference_data=df_ref_cls[["target", "prediction"]],
+        current_data=df_prod_cls[["target", "prediction"]],
+    )
+    path = os.path.join(output_dir, "04_classification.html")
+    cls_report.save_html(path)
+    print(f"  Guardado: {path}")
+
+    print("[5/5] Generando reporte de Confianza del Modelo...")
+    confidence_report = Report(metrics=[
+        ColumnDriftMetric(column_name="confianza"),
+        ColumnDistributionMetric(column_name="confianza"),
+        ColumnDriftMetric(column_name="margen"),
+        ColumnDistributionMetric(column_name="margen"),
+        ColumnDriftMetric(column_name="entropia"),
+        ColumnDistributionMetric(column_name="entropia"),
+    ])
+    confidence_report.run(
+        reference_data=df_ref[["confianza", "margen", "entropia"]],
+        current_data=df_prod[["confianza", "margen", "entropia"]],
+    )
+    path = os.path.join(output_dir, "05_model_confidence.html")
+    confidence_report.save_html(path)
+    print(f"  Guardado: {path}")
+
+    print(f"\n{'='*50}")
+    print(f"5 reportes generados en: {os.path.abspath(output_dir)}")
+    print(f"{'='*50}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="AvoScan — Monitoreo con Evidently AI")
     parser.add_argument("--model", default="../backend/model/modelo_palta.keras")
     parser.add_argument("--labels", default="../backend/model/labels.json")
     parser.add_argument("--dataset", default="../../Dataset_Palta_Maestro")
     parser.add_argument("--output", default="./reports")
+    parser.add_argument("--ref-csv", default=None,
+                        help="CSV con datos de referencia pre-calculados (no requiere TF ni dataset)")
+    parser.add_argument("--save-csv", default=None,
+                        help="Guardar datos de referencia como CSV para uso futuro")
     parser.add_argument("--prod-dir", default=None,
                         help="Carpeta con imágenes de producción. Si no se indica, simula drift.")
     args = parser.parse_args()
 
-    os.makedirs(args.output, exist_ok=True)
+    if args.ref_csv and os.path.isfile(args.ref_csv):
+        print(f"Cargando datos de referencia desde CSV: {args.ref_csv}")
+        df_ref = pd.read_csv(args.ref_csv)
+        print(f"  Referencia: {len(df_ref)} registros")
+    else:
+        import json
+        import tensorflow as tf
 
-    print("Cargando modelo...")
-    model = tf.keras.models.load_model(args.model)
-    with open(args.labels, "r") as f:
-        class_names = json.load(f)
-    print(f"Modelo cargado: {len(class_names)} clases")
+        print("Cargando modelo...")
+        model = tf.keras.models.load_model(args.model)
+        with open(args.labels, "r") as f:
+            class_names = json.load(f)
+        print(f"Modelo cargado: {len(class_names)} clases")
 
-    print("Construyendo dataset de referencia (test)...")
-    df_ref = build_dataset(model, args.dataset, "test", class_names)
-    print(f"  Referencia: {len(df_ref)} imágenes")
+        print("Construyendo dataset de referencia (test)...")
+        df_ref = build_dataset(model, args.dataset, "test", class_names)
+        print(f"  Referencia: {len(df_ref)} imágenes")
+
+        if args.save_csv:
+            os.makedirs(os.path.dirname(args.save_csv) or ".", exist_ok=True)
+            df_ref.to_csv(args.save_csv, index=False)
+            print(f"  CSV guardado: {args.save_csv}")
 
     if args.prod_dir and os.path.isdir(args.prod_dir):
+        import json
+        import tensorflow as tf
+        from PIL import Image
+
         print(f"Construyendo dataset de producción desde {args.prod_dir}...")
+        model_path = args.model
+        labels_path = args.labels
+        model = tf.keras.models.load_model(model_path)
+        with open(labels_path, "r") as f:
+            class_names = json.load(f)
+
         records = []
         for fname in sorted(os.listdir(args.prod_dir)):
             ext = os.path.splitext(fname)[1].lower()
@@ -152,93 +262,9 @@ def main():
         print("Simulando drift en datos de producción...")
         df_prod = simulate_drift(df_ref)
 
-    print(f"  Producción: {len(df_prod)} imágenes")
+    print(f"  Producción: {len(df_prod)} registros")
 
-    cols_features = [
-        "brillo", "contraste", "canal_R", "canal_G", "canal_B",
-        "saturacion", "nitidez", "confianza", "margen", "entropia",
-    ]
-
-    # --- Reporte 1: Data Drift ---
-    print("\n[1/5] Generando reporte de Data Drift...")
-    data_drift_report = Report(metrics=[
-        DataDriftPreset(),
-        DatasetDriftMetric(),
-    ])
-    data_drift_report.run(
-        reference_data=df_ref[cols_features],
-        current_data=df_prod[cols_features],
-    )
-    path = os.path.join(args.output, "01_data_drift.html")
-    data_drift_report.save_html(path)
-    print(f"  Guardado: {path}")
-
-    # --- Reporte 2: Target Drift (distribución de predicciones) ---
-    print("[2/5] Generando reporte de Target Drift...")
-    df_ref_target = df_ref[["prediccion"]].rename(columns={"prediccion": "target"})
-    df_prod_target = df_prod[["prediccion"]].rename(columns={"prediccion": "target"})
-
-    target_drift_report = Report(metrics=[TargetDriftPreset()])
-    target_drift_report.run(
-        reference_data=df_ref_target,
-        current_data=df_prod_target,
-    )
-    path = os.path.join(args.output, "02_target_drift.html")
-    target_drift_report.save_html(path)
-    print(f"  Guardado: {path}")
-
-    # --- Reporte 3: Data Quality ---
-    print("[3/5] Generando reporte de Data Quality...")
-    data_quality_report = Report(metrics=[
-        DataQualityPreset(),
-        DatasetMissingValuesMetric(),
-        DatasetCorrelationsMetric(),
-    ])
-    data_quality_report.run(
-        reference_data=df_ref[cols_features],
-        current_data=df_prod[cols_features],
-    )
-    path = os.path.join(args.output, "03_data_quality.html")
-    data_quality_report.save_html(path)
-    print(f"  Guardado: {path}")
-
-    # --- Reporte 4: Classification Performance ---
-    print("[4/5] Generando reporte de Clasificación...")
-    df_ref_cls = df_ref.rename(columns={"prediccion": "prediction"})
-    df_prod_cls = df_prod.rename(columns={"prediccion": "prediction"})
-    df_ref_cls["target"] = df_ref_cls["prediction"]
-    df_prod_cls["target"] = df_prod_cls["prediction"]
-
-    cls_report = Report(metrics=[ClassificationPreset()])
-    cls_report.run(
-        reference_data=df_ref_cls[["target", "prediction"]],
-        current_data=df_prod_cls[["target", "prediction"]],
-    )
-    path = os.path.join(args.output, "04_classification.html")
-    cls_report.save_html(path)
-    print(f"  Guardado: {path}")
-
-    # --- Reporte 5: Confianza del Modelo (análisis detallado) ---
-    print("[5/5] Generando reporte de Confianza del Modelo...")
-    confidence_report = Report(metrics=[
-        ColumnDriftMetric(column_name="confianza"),
-        ColumnDistributionMetric(column_name="confianza"),
-        ColumnDriftMetric(column_name="margen"),
-        ColumnDistributionMetric(column_name="margen"),
-        ColumnDriftMetric(column_name="entropia"),
-        ColumnDistributionMetric(column_name="entropia"),
-    ])
-    confidence_report.run(
-        reference_data=df_ref[["confianza", "margen", "entropia"]],
-        current_data=df_prod[["confianza", "margen", "entropia"]],
-    )
-    path = os.path.join(args.output, "05_model_confidence.html")
-    confidence_report.save_html(path)
-    print(f"  Guardado: {path}")
-
-    print(f"\n{'='*50}")
-    print(f"5 reportes generados en: {os.path.abspath(args.output)}")
-    print(f"{'='*50}")
+    generate_reports(df_ref, df_prod, args.output)
 
 
 if __name__ == "__main__":

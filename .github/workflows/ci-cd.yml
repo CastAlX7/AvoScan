@@ -104,10 +104,41 @@ jobs:
             ${{ env.FRONTEND_IMAGE }}:latest
             ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
 
+  # ─── Monitoring: generar reportes con Evidently AI ───
+  monitoring:
+    name: Monitoring
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install monitoring dependencies
+        run: pip install -r monitoring/requirements-ci.txt
+
+      - name: Generate Evidently reports
+        working-directory: ./monitoring
+        run: python generate_reports.py --ref-csv ./data/reference.csv --output ./reports
+
+      - name: Commit and push reports
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add monitoring/reports/
+          git diff --staged --quiet || git commit -m "chore: actualizar reportes de monitoreo [skip ci]"
+          git push
+
   # ─── Deploy: trigger Render redeploy ───
   deploy:
     name: Deploy
-    needs: [backend, frontend]
+    needs: [backend, frontend, monitoring]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
