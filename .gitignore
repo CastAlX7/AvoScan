@@ -12,8 +12,8 @@ node_modules/
 # Model (~13MB, within GitHub limits)
 # backend/model/modelo_palta.keras
 
-# Monitoring reports
-monitoring/reports/
+# Monitoring reports (included for deployment)
+# monitoring/reports/
 
 # OS
 .DS_Store
