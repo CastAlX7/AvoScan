@@ -129,7 +129,7 @@ jobs:
           git diff --staged --quiet || git commit -m "chore: actualizar reportes de monitoreo [skip ci]"
           git push
 
-  # ─── Deploy: trigger Render redeploy ───
+  # ─── Deploy: trigger Render + Vercel redeploy ───
   deploy:
     name: Deploy
     needs: [backend, frontend, monitoring]
@@ -142,4 +142,5 @@ jobs:
         run: curl -s "${{ vars.RENDER_DEPLOY_HOOK_BACKEND }}"
 
       - name: Deploy frontend to Vercel
-        run: echo "Frontend deploys automatically via Vercel GitHub integration"
+        if: vars.VERCEL_DEPLOY_HOOK != ''
+        run: curl -s -X POST "${{ vars.VERCEL_DEPLOY_HOOK }}"
